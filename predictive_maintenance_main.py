@@ -31,7 +31,7 @@ class IoTSensorDataGenerator:
         timestamps = pd.date_range(
             start=datetime.now() - timedelta(days=self.days),
             end=datetime.now(),
-            freq='H'
+            freq='h'
         )
 
         data = []
@@ -73,13 +73,32 @@ class IoTSensorDataGenerator:
         return pd.DataFrame(data)
 
 class TimeSeriesPreprocessor:
-    def __init__(self, sequence_length=24, overlap=12):
+    def __init__(self, sequence_length=24, overlap=12, horizon=48):
         self.sequence_length = sequence_length
         self.overlap = overlap
+        self.horizon = horizon
         self.scalers = {}
 
-    def create_sequences(self, data, target_col='failure'):
-        features = ['temperature', 'vibration', 'pressure', 'humidity', 'current']
+    FEATURES = ['temperature', 'vibration', 'pressure', 'humidity', 'current']
+
+    def create_sequences(self, data, target_col='failure', horizon=None, fit_scalers=True):
+        """Window the sensor history and label each window by what happens next.
+
+        `horizon` is the number of steps ahead the label looks. With
+        `horizon=48`, a window covering hours t..t+23 is labelled 1 when a
+        failure occurs in hours t+24..t+71 — the model is asked to see it coming.
+
+        This used to label a window by whether a failure occurred *inside* it,
+        which is detection after the fact, not prediction. Nothing in the model
+        could have forecast anything, however good the accuracy looked.
+
+        `fit_scalers=False` reuses scalers already fitted on the training split.
+        Fitting on everything first leaks test-set minima and maxima into
+        training.
+        """
+        if horizon is None:
+            horizon = self.horizon
+        features = self.FEATURES
 
         sequences = []
         labels = []
@@ -87,23 +106,75 @@ class TimeSeriesPreprocessor:
         for sensor_id in data['sensor_id'].unique():
             sensor_data = data[data['sensor_id'] == sensor_id].sort_values('timestamp')
 
-            if sensor_id not in self.scalers:
-                self.scalers[sensor_id] = MinMaxScaler()
+            if fit_scalers:
+                self.scalers.setdefault(sensor_id, MinMaxScaler())
                 sensor_features = self.scalers[sensor_id].fit_transform(sensor_data[features])
             else:
-                sensor_features = self.scalers[sensor_id].transform(sensor_data[features])
+                scaler = self.scalers.get(sensor_id)
+                if scaler is None:
+                    continue
+                sensor_features = scaler.transform(sensor_data[features])
 
             sensor_labels = sensor_data[target_col].values
 
             step_size = self.sequence_length - self.overlap
-            for i in range(0, len(sensor_features) - self.sequence_length + 1, step_size):
-                sequence = sensor_features[i:i + self.sequence_length]
-                label = int(np.any(sensor_labels[i:i + self.sequence_length]))
-
+            last_start = len(sensor_features) - self.sequence_length - horizon
+            for i in range(0, last_start + 1, step_size):
+                window_end = i + self.sequence_length
+                sequence = sensor_features[i:window_end]
+                future = sensor_labels[window_end:window_end + horizon]
+                labels.append(int(np.any(future)))
                 sequences.append(sequence)
-                labels.append(label)
 
         return np.array(sequences), np.array(labels)
+
+    def prepare_splits(self, data, target_col='failure', horizon=None,
+                       train_frac=0.6, val_frac=0.2):
+        """Split chronologically, then window each split on its own.
+
+        Two reasons this is not `train_test_split(..., shuffle=True)`:
+
+        Consecutive windows overlap by `self.overlap` hours, so a random split
+        puts the *same hours* in train and test. And the failure rate rises over
+        time in this data, so shuffling lets the model see the future. Both
+        inflate the score without improving the model.
+
+        Splitting per sensor keeps every sensor represented in all three sets.
+        """
+        train_parts, val_parts, test_parts = [], [], []
+        for sensor_id in data['sensor_id'].unique():
+            sensor_data = data[data['sensor_id'] == sensor_id].sort_values('timestamp')
+            n = len(sensor_data)
+            i_train = int(n * train_frac)
+            i_val = int(n * (train_frac + val_frac))
+            train_parts.append(sensor_data.iloc[:i_train])
+            val_parts.append(sensor_data.iloc[i_train:i_val])
+            test_parts.append(sensor_data.iloc[i_val:])
+
+        train_df = pd.concat(train_parts, ignore_index=True)
+        val_df = pd.concat(val_parts, ignore_index=True)
+        test_df = pd.concat(test_parts, ignore_index=True)
+
+        # Each split needs at least one window plus its horizon, or it yields no
+        # sequences at all. Returning silently-empty validation and test sets is
+        # worse than stopping: training would appear to run and score nothing.
+        needed = self.sequence_length + (self.horizon if horizon is None else horizon)
+        for name, part in (('train', train_parts), ('validation', val_parts), ('test', test_parts)):
+            shortest = min(len(x) for x in part)
+            if shortest < needed:
+                raise ValueError(
+                    f"{name} split has a sensor with only {shortest} readings, but a "
+                    f"window of {self.sequence_length} plus a horizon of "
+                    f"{needed - self.sequence_length} needs {needed}. Use more history "
+                    f"per sensor, a shorter horizon, or a shorter sequence_length."
+                )
+
+        # scalers are fitted on the training window only, then reused
+        X_train, y_train = self.create_sequences(train_df, target_col, horizon, fit_scalers=True)
+        X_val, y_val = self.create_sequences(val_df, target_col, horizon, fit_scalers=False)
+        X_test, y_test = self.create_sequences(test_df, target_col, horizon, fit_scalers=False)
+
+        return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
     def save_scalers(self, filepath):
         joblib.dump(self.scalers, filepath)
@@ -406,15 +477,12 @@ async def main():
     print("Generating synthetic IoT sensor data...")
     raw_data = data_generator.generate_synthetic_data()
 
-    preprocessor = TimeSeriesPreprocessor(sequence_length=24, overlap=12)
-    print("Creating time series sequences...")
-    X, y = preprocessor.create_sequences(raw_data)
+    preprocessor = TimeSeriesPreprocessor(sequence_length=24, overlap=12, horizon=48)
+    print("Creating time series sequences (48-hour prediction horizon)...")
+    (X_train, y_train), (X_val, y_val), (X_test, y_test) = preprocessor.prepare_splits(raw_data)
 
-    print(f"Generated {len(X)} sequences with shape {X.shape}")
-    print(f"Failure rate: {np.mean(y):.3f}")
-
-    X_temp, X_test, y_temp, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    X_train, X_val, y_train, y_val = train_test_split(X_temp, y_temp, test_size=0.25, random_state=42, stratify=y_temp)
+    print(f"Sequences: train {X_train.shape}, val {X_val.shape}, test {X_test.shape}")
+    print(f"Failure rate: train {np.mean(y_train):.3f}, test {np.mean(y_test):.3f}")
 
     print(f"Training set: {X_train.shape}, Validation set: {X_val.shape}, Test set: {X_test.shape}")
 
