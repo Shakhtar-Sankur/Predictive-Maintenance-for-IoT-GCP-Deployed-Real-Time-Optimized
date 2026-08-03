@@ -507,8 +507,8 @@ class ProductionModelManager:
         print(f"  Model B: {(1 - traffic_split) * 100:.1f}% traffic")
 
         return {
-            'model_a_endpoint': f"projects/{project_id}/locations/us-central1/endpoints/model-a",
-            'model_b_endpoint': f"projects/{project_id}/locations/us-central1/endpoints/model-b",
+            'model_a_endpoint': f"projects/{self.project_id}/locations/us-central1/endpoints/model-a",
+            'model_b_endpoint': f"projects/{self.project_id}/locations/us-central1/endpoints/model-b",
             'traffic_split': traffic_split
         }
 
