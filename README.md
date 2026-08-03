@@ -1,54 +1,65 @@
+# Predictive Maintenance for IoT on GCP
 
-# Predictive-Maintenance-for-IoT-GCP-Deployed-Real-Time-Optimized
-A fully integrated, cloud-deployable Predictive Maintenance system leveraging advanced machine learning, real-time data pipelines, and serverless architecture. The system is optimized for scalability, speed, and accuracy with GCP-native services.
+**Predict equipment failure ahead of time from streaming sensor data, with the training,
+serving and deployment paths all written out.**
 
-##  Key Highlights
+## What's here
 
-- ✅ **93%+ Accuracy** using optimized LSTM ensemble models
-- ✅ **Real-Time Prediction** with FastAPI + Redis (Sub-100ms latency)
-- ✅ **50K+ Events/Day** handled using GCP Pub/Sub + Dataflow
-- ✅ **60% Training Time Reduction** via hyperparameter tuning & model compression
-- ✅ **Production-Ready Deployment** with GCP (Vertex AI, Cloud Functions, BigQuery)
+Four modules, each a full layer of the system.
 
----
-##  Features Breakdown
+### `predictive_maintenance_main.py` — the core pipeline
+`IoTSensorDataGenerator` synthesises realistic multi-sensor signals with injected
+degradation, so the pipeline can be exercised without hardware. `TimeSeriesPreprocessor`
+handles scaling and windowing into sequences. `PredictiveMaintenanceModel` is the LSTM.
+`RealTimePredictor`, `ModelOptimizer` and `MonitoringDashboard` cover inference, size
+reduction and reporting.
 
-###  1. Main Application (`predictive_maintenance_main.py`)
-- ✅ LSTM time-series model with **93%+ failure prediction accuracy**
-- ✅ Synthetic sensor data generator (realistic IoT signals)
-- ✅ Feature scaling & sequential data preparation
-- ✅ Real-time inference pipeline with **Redis-based caching** for speed
+### `model_training_optimization.py` — getting the model to production quality
+`AdvancedFeatureEngineering`, `HyperparameterOptimizer` (Optuna), `EnsembleModel`,
+`ModelCompression`, `AdvancedTrainingPipeline`, `ProductionModelManager` and
+`PerformanceBenchmark`.
 
-###  2. GCP Deployment Pipeline (`gcp_deployment_script.py`)
-- ✅ **Cloud Function** for serverless prediction
-- ✅ **Pub/Sub** handles streaming input (~50K+ events/day)
-- ✅ **BigQuery** stores processed sensor data (partitioned + materialized views)
-- ✅ **Vertex AI** model deployment with **auto-scaling (1–10 replicas)**
-- ✅ **Dataflow** stream processor with anomaly detection & quality checks
-- ✅ **Cloud Monitoring** for system health + custom metrics
+### `realtime_processing_system.py` — the serving path
+FastAPI with Pydantic schemas (`SensorReading`, `PredictionResult`),
+`RealTimePreprocessor`, `ModelInferenceEngine`, `StreamingPipeline`, `WebSocketManager`
+for live push, plus `MetricsCollector`, `PerformanceMonitor` and `DataQualityChecker`.
 
-###  3. Advanced Model Training (`model_training_optimization.py`)
-- ✅ Hyperparameter tuning using **Optuna**
-- ✅ Ensemble modeling: LSTM, GRU, CNN, Random Forest, Gradient Boosting
-- ✅ **Model compression**: Quantization & Pruning
-- ✅ A/B testing with versioned model deployment
-- ✅ Automated retraining on **drift detection**
-- ✅ Metrics: **AUC, Precision, Recall, F1, Inference Latency**
+### `gcp_deployment_script.py` — the cloud wiring
+Pub/Sub ingestion, a Dataflow pipeline (`ProcessSensorData`, `AggregateMetrics`), a Cloud
+Function predictor, Vertex AI endpoint with autoscaling, BigQuery storage, Cloud
+Monitoring, and an `AutoScalingManager`.
 
-###  4. Real-Time System (`realtime_processing_system.py`)
-- ✅ **FastAPI** server + WebSocket for live dashboarding
-- ✅ **Redis** cache for ultra-fast predictions
-- ✅ Live alerting system with failure explanations
-- ✅ Batch export to **BigQuery** for analysis
-- ✅ Data validation + anomaly scoring in streaming layer
+## Design targets
 
----
-##  Technologies Used
+- Predict failures roughly 48 hours ahead
+- Accuracy in the low-to-mid nineties on the failure class
+- Handle tens of thousands of events per day across a few hundred devices
+- Sub-100 ms inference on the serving path
+- Meaningful reduction in unplanned downtime
 
-| Category         | Tools & Frameworks                                      |
-|------------------|----------------------------------------------------------|
-| ML/AI            | TensorFlow, Scikit-learn, Optuna                         |
-| Real-time        | FastAPI, Redis, WebSockets                               |
-| Cloud Platform   | GCP (BigQuery, Pub/Sub, Vertex AI, Cloud Functions)     |
-| Data Processing  | Pandas, NumPy, GCP Dataflow                              |
-| Monitoring       | Cloud Monitoring, Custom GCP Metrics, Alerting Rules     |
+## On the numbers
+
+The figures above are **design targets** that shaped the implementation — they are not
+measured results. This repository ships no benchmark harness and no trained weights, so
+nothing here reproduces them. They are recorded because they drove real decisions about
+architecture and algorithm choice, not as claims about observed performance.
+
+## Running it
+
+```bash
+pip install -r requirements.txt
+python predictive_maintenance_main.py     # generates data, trains, evaluates
+python realtime_processing_system.py      # FastAPI serving layer
+```
+
+`gcp_deployment_script.py` expects a configured GCP project and credentials. Model
+artefacts (`.h5`, `sensor_scalers.pkl`) are produced by training and are not committed.
+
+## Status
+
+All four layers implemented. Runs end to end locally against synthetic sensor data; the
+GCP path needs a real project to execute.
+
+## Licence
+
+All rights reserved. Published for reading, not for reuse.
