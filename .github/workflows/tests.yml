@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Feature engineering needs pandas and scikit-learn and nothing else —
+      # no TensorFlow, no Google Cloud, which is why it now lives in its own
+      # module. Installing them here would prove nothing and cost ten minutes.
+      - run: pip install numpy pandas scikit-learn pytest
+
+      - run: pytest -q
