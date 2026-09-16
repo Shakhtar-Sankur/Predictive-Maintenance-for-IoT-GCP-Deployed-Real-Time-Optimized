@@ -45,6 +45,42 @@ measured results. This repository ships no benchmark harness and no trained weig
 nothing here reproduces them. They are recorded because they drove real decisions about
 architecture and algorithm choice, not as claims about observed performance.
 
+## Tests
+
+```bash
+pip install numpy pandas scikit-learn pytest
+pytest -q
+```
+
+12 tests over the feature engineering, against a small frame whose right
+answers can be worked out by hand: two sensors interleaved in time, one
+climbing and one constant.
+
+- **Rolling windows stay inside one sensor.** The constant sensor must show a
+  rolling mean of exactly its own value and a standard deviation of zero;
+  anything else means one machine's history leaked into another's features.
+- Rolling means match the hand-computed values, the first reading carries a
+  zero rather than a NaN, hours and days are encoded on a circle so 23:00 and
+  midnight are neighbours, a zero vibration reading does not produce infinity,
+  and the input frame is left unmodified.
+- **Scalers are reused, not refitted.** Validation data passed with
+  `fit_scalers=False` keeps the training scaler, which is the difference
+  between a real validation score and a flattering one.
+
+`AdvancedFeatureEngineering` moved to `feature_engineering.py`.
+`model_training_optimization.py` imports TensorFlow, Optuna and MLflow at module
+level, and none of them has anything to do with building features from a
+DataFrame; it re-exports the class, so existing imports are unaffected.
+
+### A caution the tests document
+
+`sensor_failure_rate` is the mean of the `failure` column per sensor, computed
+over whatever frame it is given — including the rows it is attached to. Build it
+inside a training split only. Computed over a whole dataset before splitting, it
+carries the answer into the features, and the validation score stops meaning
+anything. The percentile flags have the same shape of problem: their thresholds
+come from the frame they are given.
+
 ## Running it
 
 ```bash
